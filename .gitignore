@@ -1,0 +1,29 @@
+# Docker
+.docker/
+.docker-build-context/
+*.tar.gz
+
+# Local environment
+.env
+.env.local
+docker.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.jar
+*.war
+build/
+dist/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

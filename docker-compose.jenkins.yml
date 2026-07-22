@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  docker-compose.jenkins.yml
+#  Runs the Jenkins CI/CD server as a Docker container.
+#
+#  WHY a separate compose file from the app's docker-compose.yml?
+#  Jenkins is infrastructure, not part of the application.
+#  Keeping them separate means you can start/stop Jenkins without touching
+#  Postgres, Redis, Kafka, or your app services — and vice versa.
+#
+#  HOW TO START JENKINS:
+#    cd terra-jenkins
+#    docker compose -f docker-compose.jenkins.yml up -d --build
+#
+#  HOW TO STOP:
+#    docker compose -f docker-compose.jenkins.yml down
+#
+#  JENKINS UI:  http://localhost:8090
+#
+# ─── TODO (Future: Server Migration) ──────────────────────────────────────────
+#  This setup runs Jenkins locally on your dev machine.
+#  When you're ready to move to a dedicated server (DigitalOcean, AWS EC2,
+#  Hetzner, etc.), the migration steps are:
+#    1. Provision a Linux VM (Ubuntu 22.04 recommended)
+#    2. Install Docker + Docker Compose on the VM
+#    3. Copy this terra-jenkins/ folder to the VM
+#    4. Run the same 'docker compose up' command there
+#    5. Point GitHub webhooks at the server's public IP
+#  The Dockerfile and compose file do NOT need to change — only the host changes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: terra-api
+
+services:
+  jenkins:
+    build:
+      # WHY context: '.'?
+      # Docker needs to know WHERE to look for the Dockerfile and any files it
+      # copies. '.' means "this directory" (terra-jenkins/). The Dockerfile is here.
+      context: .
+      dockerfile: jenkins.Dockerfile
+
+    container_name: terra-jenkins
+
+    ports:
+      # WHY 8090 instead of 8081/8082?
+      # terra-api's own app binds those two ports (server + management). 8090
+      # is a safe alternative that doesn't collide with either.
+      - "8090:8080"
+
+      # WHY port 50000?
+      # This is the Jenkins agent communication port (JNLP protocol).
+      # Right now we have no separate build agents, so this isn't used.
+      # We expose it anyway so you don't need to rebuild the container if you
+      # add a dedicated agent machine later (Phase 3+).
+      - "50000:50000"
+
+    volumes:
+      # WHY jenkins_home volume?
+      # All Jenkins data — installed plugins, job configurations, build history,
+      # and saved credentials — lives in /var/jenkins_home inside the container.
+      # Without a volume, every time you restart the container you'd lose all of
+      # that and have to set Jenkins up from scratch.
+      # A named Docker volume persists independently of the container lifecycle.
+      - jenkins_home:/var/jenkins_home
+
+      # WHY mount /var/run/docker.sock?
+      # This is the Docker socket — the communication channel to the host's
+      # Docker daemon. By sharing it into the Jenkins container, Jenkins can
+      # run 'docker build', 'docker push', and 'docker compose' commands that
+      # execute on the HOST's Docker engine (not a nested one).
+      # This is the standard "Docker outside of Docker" (DooD) pattern.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    restart: unless-stopped
+    # WHY unless-stopped?
+    # Jenkins should survive accidental container crashes and machine reboots.
+    # 'unless-stopped' means: restart automatically unless YOU explicitly
+    # run 'docker compose down'. It won't restart if you stopped it on purpose.
+
+volumes:
+  jenkins_home:
+    name: infra_jenkins_home  # Pin to old volume name so existing Jenkins data is preserved
+    # WHY a named volume instead of a bind mount (e.g., ./jenkins-data)?
+    # Named volumes are managed by Docker and stored in Docker's own storage area.
+    # This is simpler for local dev — no Windows path permission issues.
+    #
+    # TODO (Future Server): On a production server, consider switching to a
+    # bind mount pointing to a directory that's included in your backup strategy:
+    #   jenkins_home:
+    #     driver: local
+    #     driver_opts:
+    #       type: none
+    #       o: bind
+    #       device: /mnt/backups/jenkins_home
